@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Display a map</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1' />
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.43.0/mapbox-gl.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.43.0/mapbox-gl.css' rel='stylesheet' />
+    <link href="https://api.mapbox.com/mapbox-assembly/v0.20.0/assembly.min.css" rel="stylesheet">
+    <script async defer src="https://api.mapbox.com/mapbox-assembly/v0.20.0/assembly.js"></script>
+    <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+    <script src='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v2.1.1/mapbox-gl-geocoder.min.js'></script>
+    <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v2.1.1/mapbox-gl-geocoder.css' type='text/css' />
+    <script src="https://www.gstatic.com/firebasejs/4.9.0/firebase.js"></script>
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+    </style>
+</head>
+<body>
+
+<!--   toggleable layer boxes   -->
+<style>
+    #menu {
+        position: absolute;
+        z-index: 1;
+        top: 50px;
+        right: 10px;
+        width: 120px;
+        font-family: 'Open Sans', sans-serif;
+    }
+
+    #menu a {
+        font-size: 13px;
+        color: #404040;
+        display: block;
+        margin: 0;
+        padding: 0;
+        padding: 10px;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(0,0,0,0.25);
+        text-align: center;
+    }
+
+    #menu a:last-child {
+        border: none;
+    }
+
+    #menu a:hover {
+        background-color: #f8f8f8;
+        color: #404040;
+    }
+
+    #menu a.active {
+        background-color: #3887be;
+        color: #ffffff;
+    }
+
+    #menu a.active:hover {
+        background: #3074a4;
+    }
+
+
+/*<!--   hover pop up display   -->*/
+    .mapboxgl-popup {
+        max-width: 400px;
+        font: 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+    }
+
+
+/*<!--   distance box display   -->*/
+.distance-container {
+/*    position: absolute;*/
+    top: 10px;
+    left: 10px;
+    z-index: 1;
+}
+
+.distance-container > * {
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+    display: block;
+    margin: 0;
+    padding: 5px 10px;
+    border-radius: 3px;
+}
+
+
+</style>
+
+<!-- Assembly sidebar/container -->
+<div class='flex-parent viewport-full relative scroll-hidden'>
+    <div class='flex-child w-full w240-ml absolute static-ml left bottom'>
+        <div class='flex-parent flex-parent--column viewport-third h-full hmax-full bg-white'>
+            <div class='flex-child flex-child--grow px12 py12 scroll-auto'>
+                <h3 class='txt-m txt-bold mb6'>Last Mile Health Communities</h3>
+                <p>Click on the communities, to find the closest health center.</p>
+
+                <h3 class='txt-m txt-bold mb6'>Legend:</h3>
+                <p>Solid red line = car road</p>
+                <p>Dashed red line = motorbike road</p>
+                <p>Dashed grey line = footpath</p>
+
+            </div>
+            <footer class='px12 py12 bg-gray-faint txt-s'>
+                Data Sources: Last Mile Health, LISGIS, OpenStreetMap
+            </footer>
+        </div>
+    </div>
+    <div class='flex-child flex-child--grow bg-darken10 viewport-twothirds viewport-full-ml relative'>
+        <!-- everything that I want on top of the map, goes in here -->   
+        <nav id="menu">
+            <div id='distance' class='distance-container'></div>
+        </nav>
+        <div id='map'></div>
+    </div>
+</div>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiaG1qdWRnZSIsImEiOiJKbTZ4cnh3In0.Hs4fKTtRBMip0AXm56Lbmg';
+
+// Initialize Firebase
+var config = {
+apiKey: "AIzaSyDw8-ojU5wHfGRJo0vavrg7gRNYcO_j-00",
+authDomain: "lmh-for-ga.firebaseapp.com",
+databaseURL: "https://lmh-for-ga.firebaseio.com",
+projectId: "lmh-for-ga",
+storageBucket: "",
+messagingSenderId: "661234207025"
+};
+firebase.initializeApp(config);
+
+// setting max zoom 
+var bounds = [
+    [-13.411819137213797,4.197892413568354], // Southwest coordinates
+    [-5.14916748737005,8.92023519205756]  // Northeast coordinates
+];
+
+
+var map = new mapboxgl.Map({
+    container: 'map', // container id
+    style: 'mapbox://styles/hmjudge/cjcilqs627yzl2rr4edjmbonf', // stylesheet location
+    center: [-9.194,6.527], // starting position [lng, lat]
+    zoom: 6.5, // starting zoom
+    maxBounds: bounds
+});
+
+// adding a geocoder 
+map.addControl(new MapboxGeocoder({
+    accessToken: mapboxgl.accessToken
+}));
+
+// adding hillshading 
+map.on('load', function () {
+    map.addSource('dem', {
+        "type": "raster-dem",
+        "url": "mapbox://mapbox.terrain-rgb"
+    });
+    map.addLayer({
+        "id": "hillshading",
+        "source": "dem",
+        "type": "hillshade"
+    });
+});
+
+// add a single popup 
+var popup = new mapboxgl.Popup({
+    closeButton: false,
+    closeOnClick: false
+});
+
+// style popup on click with village name, closest clinic name, and distance to clinic 
+map.on('click', function(e) {
+ var features = map.queryRenderedFeatures(e.point, {
+  layers: ['lmh-communities'] // replace this with the name of the layer
+ });
+
+ if (!features.length) {
+  return;
+ }
+
+ var feature = features[0];
+
+ var points = map.querySourceFeatures("composite", {
+  sourceLayer: 'health_facilities'
+ });
+
+ // calculating nearest clinic
+ var collection = turf.featureCollection(points);
+
+ var nearest = turf.nearestPoint(feature.geometry.coordinates, collection);
+
+ // print what's returned, for reference and debugging
+ // console.log(nearest);
+ // console.log(collection);
+
+ // calculating distance to nearest clinic
+ var distance = Math.round(turf.distance(nearest, feature));
+
+ // popup content
+ popup.setLngLat(feature.geometry.coordinates)
+ .setHTML('<h3>' + "Community name: " + feature.properties.communityN + '</h3><p>' + "Number of houses: " + feature.properties.numberOfHo + '</p><p>' + "Closest health facility: " + nearest.properties.facility_n + '</p><p> Distance to facility: ' + distance + " km" + '</p>')
+ .setLngLat(feature.geometry.coordinates)
+ .addTo(map);
+
+});
+
+// creating popup on click for facilities 
+
+map.on('click', function(e) {
+ var features = map.queryRenderedFeatures(e.point, {
+  layers: ['health-facilities'] // replace this with the name of the layer
+ });
+
+ if (!features.length) {
+  return;
+ }
+
+ var feature = features[0];
+
+ // popup content
+ popup.setLngLat(feature.geometry.coordinates)
+ .setHTML('<h3>' + "Facility name: " + feature.properties.facility_n + '</h3><p>' + "Facility type: " + feature.properties.facility_t + '</p><p>' + "District: " + feature.properties.District + '</p><p>' + "Head Doctor: " + feature.properties.Head_Docto + '</p><p>' + "Number of beds: " + feature.properties.beds + '</p><p>' + "Cell coverage: " + feature.properties.Which_cell + '</p>')
+ .setLngLat(feature.geometry.coordinates)
+ .addTo(map);
+});
+
+//adding hover popup for communities 
+
+map.on('mouseenter', 'lmh-communities', function(e) {
+ // Change the cursor style as a UI indicator.
+ map.getCanvas().style.cursor = 'pointer';
+ var features = map.queryRenderedFeatures(e.point, {
+  layers: ['lmh-communities']
+ });
+
+ // Populate the popup and set its coordinates based on the feature found.
+ popup.setLngLat(features[0].geometry.coordinates)
+ .setHTML('<h3>' + "Community name: " + features[0].properties.communityN + '</h3>')
+ .addTo(map);
+});
+
+map.on('mouseleave', 'lmh-communities', function() {
+ map.getCanvas().style.cursor = '';
+ popup.remove();
+});
+
+// adding hover popup for clinics
+
+map.on('mouseenter', 'health-facilities', function(e) {
+ // Change the cursor style as a UI indicator.
+ map.getCanvas().style.cursor = 'pointer';
+ var features = map.queryRenderedFeatures(e.point, {
+     layers: ['health-facilities']
+ });
+
+    // printing results for reference
+    // console.log(features[0].properties)
+
+ // Populate the popup and set its coordinates
+ // based on the feature found.
+ popup.setLngLat(features[0].geometry.coordinates)
+ .setHTML('<h3>' + "Facility name: " + features[0].properties.facility_n + " " + features[0].properties.facility_t + '</h3>')
+ .addTo(map);
+});
+
+map.on('mouseleave', 'health-facilities', function() {
+ map.getCanvas().style.cursor = '';
+ popup.remove();
+});
+
+// setting toggleable layers
+var toggleableLayerIds = ids = [{
+ display: 'communities',
+ id: 'lmh-communities' 
+}, {
+ display: 'health facilities',
+ id: 'health-facilities'
+}];
+
+var distanceContainer = document.getElementById('distance');
+
+// // turn this back on to make it work with non-assembly buttons
+//     var link = document.createElement('a');
+//     link.href = '#';
+//     link.className = 'active';
+//     link.textContent = id.display;
+//     link.id = id.id;
+
+// toggle on to re-enable layers
+        // var visibility = map.getLayoutProperty(clickedLayer, 'visibility');
+
+        // if (visibility === 'visible') {
+        //     map.setLayoutProperty(clickedLayer, 'visibility', 'none');
+        //     this.className = '';
+        // } else {
+        //     this.className = 'active';
+        //     map.setLayoutProperty(clickedLayer, 'visibility', 'visible');
+        // }
+
+for (var i = 0; i < toggleableLayerIds.length; i++) {
+
+ var id = toggleableLayerIds[i];
+
+ var link = document.createElement('button');
+ link.href = '#';
+ link.className = 'btn';
+ link.textContent = id.display;
+ link.id = id.id;
+
+ // var linkEnabled = true;
+
+ link.onclick = function (e) {
+  var clickedLayer = this.id;
+  // linkEnabled = !linkEnabled;
+  e.preventDefault();
+  e.stopPropagation();
+
+  // toggle on to re-enable layers
+        // var visibility = map.getLayoutProperty(clickedLayer, 'visibility');
+
+        // if (visibility === 'visible') {
+        //     map.setLayoutProperty(clickedLayer, 'visibility', 'none');
+        //     this.className = '';
+        // } else {
+        //     this.className = 'active';
+        //     map.setLayoutProperty(clickedLayer, 'visibility', 'visible');
+        // }
+
+        var visibility = map.getLayoutProperty(clickedLayer, 'visibility');
+
+        if (visibility === 'visible') {
+            map.setLayoutProperty(clickedLayer, 'visibility', 'none');
+            this.className = 'btn btn--stroke';
+        } else {
+            this.className = 'btn';
+            map.setLayoutProperty(clickedLayer, 'visibility', 'visible');
+        }
+
+  // link.classList.toggle('btn');
+ };
+
+ var layers = document.getElementById('menu');
+ layers.insertBefore(link, distanceContainer);
+
+};
+
+
+// adding distance calculator 
+
+var distanceButton = document.createElement('button');
+distanceButton.textContent = 'calculate distance';
+distanceButton.className = 'btn btn--stroke';
+
+
+var distanceEnabled = false;
+
+// GeoJSON object to hold our measurement features
+var geojson = {
+ "type": "FeatureCollection",
+ "features": []
+};
+
+distanceButton.onclick = function(e) {
+ console.log('hello');
+ distanceEnabled = !distanceEnabled;
+ geojson = {
+  "type": "FeatureCollection",
+  "features": []
+ };
+ map.getSource('geojson').setData(geojson);
+ distanceButton.classList.toggle('btn--stroke');
+};
+
+document.getElementById('menu').insertBefore(distanceButton, distanceContainer);
+
+
+// Used to draw a line between points
+var linestring = {
+    "type": "Feature",
+    "geometry": {
+        "type": "LineString",
+        "coordinates": []
+    }
+};
+
+map.on('load', function() {
+    map.addSource('geojson', {
+        "type": "geojson",
+        "data": geojson
+    });
+
+    // Add styles to the map
+    map.addLayer({
+        id: 'measure-points',
+        type: 'circle',
+        source: 'geojson',
+        paint: {
+            'circle-radius': 5,
+            'circle-color': '#000'
+        },
+        filter: ['in', '$type', 'Point']
+    });
+    map.addLayer({
+        id: 'measure-lines',
+        type: 'line',
+        source: 'geojson',
+        layout: {
+            'line-cap': 'round',
+            'line-join': 'round'
+        },
+        paint: {
+            'line-color': '#000',
+            'line-width': 2.5
+        },
+        filter: ['in', '$type', 'LineString']
+    });
+
+    map.on('click', function(e) {
+        if (!distanceEnabled) return;
+        var features = map.queryRenderedFeatures(e.point, { layers: ['measure-points'] });
+
+        // Remove the linestring from the group
+        // So we can redraw it based on the points collection
+        if (geojson.features.length > 1) geojson.features.pop();
+
+        // Clear the Distance container to populate it with a new value
+        distanceContainer.innerHTML = '';
+
+        // If a feature was clicked, remove it from the map
+        if (features.length) {
+            var id = features[0].properties.id;
+            geojson.features = geojson.features.filter(function(point) {
+                return point.properties.id !== id;
+            });
+        } else {
+            var point = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        e.lngLat.lng,
+                        e.lngLat.lat
+                    ]
+                },
+                "properties": {
+                    "id": String(new Date().getTime())
+                }
+            };
+
+            geojson.features.push(point);
+        }
+
+        if (geojson.features.length > 1) {
+            linestring.geometry.coordinates = geojson.features.map(function(point) {
+                return point.geometry.coordinates;
+            });
+
+            geojson.features.push(linestring);
+
+            // Populate the distanceContainer with total distance
+            var value = document.createElement('pre');
+            value.textContent = 'Total distance: ' + turf.lineDistance(linestring).toLocaleString() + 'km';
+            distanceContainer.appendChild(value);
+        }
+
+        map.getSource('geojson').setData(geojson);
+    });
+});
+
+    map.on('mousemove', function (e) {
+        var features = map.queryRenderedFeatures(e.point, { layers: ['measure-points'] });
+        // UI indicator for clicking/hovering a point on the map
+        map.getCanvas().style.cursor = (features.length) ? 'pointer' : 'crosshair';
+    });
+
+
+</script>
+
+
+</body>
+</html>
